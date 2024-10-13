@@ -11,7 +11,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 # *transformers
-from transformers import MBartForConditionalGeneration, MBartTokenizer,MBartConfig
+from transformers import MBartForConditionalGeneration, MBart50Tokenizer,MBartConfig
 
 # *user-defined
 from models import  SLRCLIP
@@ -81,7 +81,7 @@ def get_args_parser():
                         help='Optimizer (default: "adamw"')
     parser.add_argument('--opt-eps', default=1.0e-09, type=float, metavar='EPSILON',
                         help='Optimizer Epsilon (default: 1.0e-09)')
-    parser.add_argument('--opt-betas', default=None, type=float, nargs='+', metavar='BETA',
+    parser.add_argument('--opt-betas', default=[0.9, 0.98], type=float, nargs='+', metavar='BETA',
                         help='Optimizer Betas (default: [0.9, 0.98], use opt default)')
     parser.add_argument('--clip-grad', type=float, default=None, metavar='NORM',
                         help='Clip gradient norm (default: None, no clipping)')
@@ -166,7 +166,7 @@ def main(args, config):
     cudnn.benchmark = False # Since the input dim is dynamic.
 
     print(f"Creating dataset:")
-    tokenizer = MBartTokenizer.from_pretrained(config['model']['tokenizer'])
+    tokenizer = MBart50Tokenizer.from_pretrained(config['model']['tokenizer'])
 
     train_data = S2T_Dataset(path=config['data']['train_label_path'], tokenizer = tokenizer, config=config, args=args, phase='train')
     print(train_data)
@@ -330,11 +330,13 @@ def train_one_epoch(args, model: torch.nn.Module, criterion: nn.CrossEntropyLoss
     for step, (src_input, tgt_input) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
 
         optimizer.zero_grad()
+
         with torch.cuda.amp.autocast():
             logits_per_image, logits_per_text, ground_truth = model(src_input, tgt_input)
-            loss_imgs = loss_img(logits_per_image,ground_truth)
-            loss_texts = loss_txt(logits_per_text,ground_truth)
-            total_loss = (loss_imgs + loss_texts)/2.
+        with torch.cuda.amp.autocast(enabled=False):
+            loss_imgs = loss_img(logits_per_image, ground_truth)
+            loss_texts = loss_txt(logits_per_text, ground_truth)
+            total_loss = (loss_imgs + loss_texts) / 2.
         loss_scaler(total_loss, optimizer)
 
         loss_value = total_loss.item()

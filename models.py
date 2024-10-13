@@ -45,6 +45,8 @@ from definition import *
 from hpman.m import _
 from pathlib import Path
 
+from peft import LoraConfig, get_peft_model, TaskType
+
 
 class PositionalEncoding(nn.Module):
     def __init__(self,
@@ -285,13 +287,14 @@ class V_encoder(nn.Module):
 def config_decoder(config):
     from transformers import AutoConfig
     
-    decoder_type = _('decoder_type', 'LD', choices=['LD', 'LLMD'])
+    decoder_type = _('decoder_type', 'LD', choices=['LD', 'LLMD', 'MB50MMT'])
     if decoder_type == 'LD':
-        
         return MBartForConditionalGeneration.from_pretrained(config['model']['visual_encoder'], ignore_mismatched_sizes = True, config = AutoConfig.from_pretrained(Path(config['model']['visual_encoder'])/'config.json'))
     elif decoder_type == 'LLMD':
         return MBartForConditionalGeneration.from_pretrained(config['model']['transformer'], ignore_mismatched_sizes = True, config = AutoConfig.from_pretrained(Path(config['model']['transformer'])/'LLMD_config.json'))
-    
+    elif decoder_type == 'MB50MMT':
+        return MBartForConditionalGeneration.from_pretrained(config['model']['transformer'], ignore_mismatched_sizes = True, config = AutoConfig.from_pretrained(Path(config['model']['transformer'])/'MB50MMT_config.json'))
+
 class gloss_free_model(nn.Module):
     def __init__(self, config, args, embed_dim=1024, pretrain=None):
         super(gloss_free_model, self).__init__()

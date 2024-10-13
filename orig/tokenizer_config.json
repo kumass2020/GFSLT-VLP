@@ -19,7 +19,7 @@
   "special_tokens_map_file": null,
   "src_lang": "de_DE",
   "tgt_lang": "de_DE",
-  "tokenizer_class": "MBart50Tokenizer",
+  "tokenizer_class": "MBartTokenizer",
   "tokenizer_file": null,
   "unk_token": "<unk>"
 }

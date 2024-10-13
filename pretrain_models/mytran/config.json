@@ -1,5 +1,5 @@
 {
-  "_name_or_path": "facebook/mbart-large-cc25",
+  "_name_or_path": "facebook/mbart-large-50-many-to-one-mmt",
   "_num_labels": 3,
   "activation_dropout": 0,
   "activation_function": "relu",
@@ -16,12 +16,12 @@
   "decoder_attention_heads": 8,
   "decoder_ffn_dim": 4096,
   "decoder_layerdrop": 0.0,
-  "decoder_layers": 3,
+  "decoder_layers": 12,
   "dropout": 0.1,
   "encoder_attention_heads": 8,
   "encoder_ffn_dim": 4096,
   "encoder_layerdrop": 0.0,
-  "encoder_layers": 3,
+  "encoder_layers": 12,
   "eos_token_id": 2,
   "forced_eos_token_id": 2,
   "id2label": {

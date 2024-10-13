@@ -1,5 +1,5 @@
 
-from transformers import MBartForConditionalGeneration, MBartTokenizer, MBartConfig
+from transformers import MBartForConditionalGeneration, MBart50Tokenizer, MBartConfig
 
 from hftrim.ModelTrimmers import MBartTrimmer
 
@@ -17,9 +17,9 @@ for key,value in raw_data.items():
     data.append(sentence)
     # data.append(gloss.lower())
 
-tokenizer = MBartTokenizer.from_pretrained("facebook/mbart-large-cc25", src_lang="de_DE", tgt_lang="de_DE")
+tokenizer = MBart50Tokenizer.from_pretrained("facebook/mbart-large-50-many-to-one-mmt", src_lang="de_DE", tgt_lang="de_DE")
 
-model = MBartForConditionalGeneration.from_pretrained("facebook/mbart-large-cc25")
+model = MBartForConditionalGeneration.from_pretrained("facebook/mbart-large-50-many-to-one-mmt")
 configuration = model.config
 
 # trim tokenizer

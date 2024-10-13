@@ -11,7 +11,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 # *transformers
-from transformers import MBartForConditionalGeneration, MBartTokenizer,MBartConfig
+from transformers import MBartForConditionalGeneration, MBart50Tokenizer,MBartConfig
 
 # *user-defined
 from models import  SLRCLIP, Text_Decoder
@@ -81,7 +81,7 @@ def get_args_parser():
                         help='Optimizer (default: "adamw"')
     parser.add_argument('--opt-eps', default=1.0e-09, type=float, metavar='EPSILON',
                         help='Optimizer Epsilon (default: 1.0e-09)')
-    parser.add_argument('--opt-betas', default=None, type=float, nargs='+', metavar='BETA',
+    parser.add_argument('--opt-betas', default=[0.9, 0.98], type=float, nargs='+', metavar='BETA',
                         help='Optimizer Betas (default: [0.9, 0.98], use opt default)')
     parser.add_argument('--clip-grad', type=float, default=None, metavar='NORM',
                         help='Clip gradient norm (default: None, no clipping)')
@@ -175,7 +175,7 @@ def main(args, config):
     cudnn.benchmark = False
 
     print(f"Creating dataset:")
-    tokenizer = MBartTokenizer.from_pretrained(config['model']['tokenizer'])
+    tokenizer = MBart50Tokenizer.from_pretrained(config['model']['tokenizer'])
 
     train_data = S2T_Dataset(path=config['data']['train_label_path'], tokenizer = tokenizer, config=config, args=args, phase='train', training_refurbish=True)
     print(train_data)

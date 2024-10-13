@@ -10,7 +10,7 @@ from torch.nn.utils.rnn import pad_sequence
 
 
 # *transformers
-from transformers import MBartForConditionalGeneration, MBartTokenizer,MBartConfig
+from transformers import MBartForConditionalGeneration, MBart50Tokenizer,MBartConfig
 from transformers.models.mbart.modeling_mbart import shift_tokens_right
 
 # *user-defined
@@ -175,7 +175,7 @@ def main(args, config):
     cudnn.benchmark = False
 
     print(f"Creating dataset:")
-    tokenizer = MBartTokenizer.from_pretrained(config['model']['tokenizer'])
+    tokenizer = MBart50Tokenizer.from_pretrained(config['model']['tokenizer'])
 
     train_data = S2T_Dataset(path=config['data']['train_label_path'], tokenizer = tokenizer, config=config, args=args, phase='train')
     print(train_data)
@@ -209,7 +209,7 @@ def main(args, config):
                                  pin_memory=args.pin_mem)
     
     print(f"Creating model:")
-    tokenizer = MBartTokenizer.from_pretrained(config['model']['tokenizer'], src_lang = 'de_DE', tgt_lang = 'de_DE')
+    tokenizer = MBart50Tokenizer.from_pretrained(config['model']['tokenizer'], src_lang = 'de_DE', tgt_lang = 'de_DE')
     model = gloss_free_model(config, args)
     model.to(device)
     print(model)
@@ -380,7 +380,9 @@ def train_one_epoch(args, model: torch.nn.Module, criterion: nn.CrossEntropyLoss
         out_logits = model(src_input, tgt_input)
         label = tgt_input['input_ids'].reshape(-1)
         logits = out_logits.reshape(-1,out_logits.shape[-1])
-        loss = criterion(logits, label.to(device, non_blocking=True))
+        # loss = criterion(logits, label.to(device, non_blocking=True))
+        label_one_hot = torch.nn.functional.one_hot(label, num_classes=logits.shape[-1]).float()
+        loss = criterion(logits, label_one_hot.to(device, non_blocking=True))
 
         optimizer.zero_grad()
         loss.backward()
@@ -421,8 +423,10 @@ def evaluate(args, dev_dataloader, model, model_without_ddp, tokenizer, criterio
             label = tgt_input['input_ids'].reshape(-1)
             
             logits = out_logits.reshape(-1,out_logits.shape[-1])
-            tgt_loss = criterion(logits, label.to(device))
-            
+            # tgt_loss = criterion(logits, label.to(device))
+            label_one_hot = torch.nn.functional.one_hot(label, num_classes=logits.shape[-1]).float()
+            tgt_loss = criterion(logits, label_one_hot.to(device, non_blocking=True))
+
             total_loss += tgt_loss
 
             metric_logger.update(loss=total_loss.item())
