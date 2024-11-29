@@ -159,6 +159,8 @@ def get_args_parser():
     parser.add_argument('--loss-lambda', type=float, default=1.0, metavar='RATE',
                         help='lambda param')
 
+    parser.add_argument('--td_lr', default=1e-3, type=float)
+
     return parser
 
 def main(args, config):
@@ -216,7 +218,7 @@ def main(args, config):
 
     if args.finetune:
         checkpoint = torch.load(args.finetune, map_location='cpu')
-        ret =  model.load_state_dict(checkpoint['model'], strict=False)
+        ret = model.load_state_dict(checkpoint['model'], strict=False)
         print('Missing keys: \n', '\n'.join(ret.missing_keys))
         print('Unexpected keys: \n', '\n'.join(ret.unexpected_keys))
 
@@ -228,29 +230,49 @@ def main(args, config):
     n_parameters = utils.count_parameters_in_MB(model_without_ddp)
     print(f'number of params: {n_parameters}M')
 
-
+    # Create optimizer for the main model using create_optimizer from timm
     optimizer = create_optimizer(args, model_without_ddp)
+
+    # Create learning rate scheduler for the main optimizer
     lr_scheduler, _ = create_scheduler(args, optimizer)
 
     text_decoder = Text_Decoder(config).to(device)
 
     if args.distributed:
-        text_decoder = torch.nn.parallel.DistributedDataParallel(text_decoder, device_ids=[args.gpu], find_unused_parameters=False)
-    optimizer_td = AdamW(text_decoder.module.parameters(), lr=1e-3, weight_decay=0, betas=(0.9, 0.98))
+        text_decoder = torch.nn.parallel.DistributedDataParallel(text_decoder, device_ids=[args.gpu],
+                                                                 find_unused_parameters=False)
 
-    lr_scheduler_td = scheduler.CosineAnnealingLR(
-                optimizer=optimizer_td,
-                eta_min=1e-8,
-                T_max=args.epochs,
-            )
+    # Create a copy of args for text decoder optimizer
+    args_td = copy.deepcopy(args)
+    args_td.lr = args.td_lr  # Set learning rate for Text_Decoder optimizer
+    args_td.weight_decay = 0  # Set weight decay for Text_Decoder optimizer
+
+    # Use the appropriate module depending on distributed training
+    if args.distributed:
+        text_decoder_module = text_decoder.module
+    else:
+        text_decoder_module = text_decoder
+
+    # Create optimizer for Text_Decoder
+    optimizer_td = create_optimizer(args_td, text_decoder_module)
+
+    # Create learning rate scheduler for Text_Decoder optimizer
+    lr_scheduler_td, _ = create_scheduler(args_td, optimizer_td)
+
     TD_train_dict = dict(
-        optimizer = optimizer_td,
-        lr_scheduler = lr_scheduler_td,
-        text_decoder = text_decoder
+        optimizer=optimizer_td,
+        lr_scheduler=lr_scheduler_td,
+        text_decoder=text_decoder
     )
 
     criterion = utils.KLLoss()
     loss_scaler = NativeScaler()
+
+    def count_trainable_parameters(model):
+        return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    print(f"Trainable parameters in model: {count_trainable_parameters(model_without_ddp)}")
+    print(f"Trainable parameters in Text_Decoder: {count_trainable_parameters(text_decoder_module)}")
 
     output_dir = Path(args.output_dir)
     if args.resume:

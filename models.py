@@ -141,28 +141,83 @@ class TextCLIP(nn.Module):
     def __init__(self, config=None, inplanes=1024, planes=1024, head_type='identy'):
         super(TextCLIP, self).__init__()
 
-        self.model_txt = MBartForConditionalGeneration.from_pretrained(config['model']['transformer']).get_encoder() 
+        # Load the MBart model
+        mbart_model = MBartForConditionalGeneration.from_pretrained(config['model']['transformer'])
 
+        # # ----------------------------------------------------------
+        # # Apply LoRA to mbart_model
+        # lora_config = LoraConfig(
+        #     task_type=TaskType.FEATURE_EXTRACTION,
+        #     r=8,
+        #     lora_alpha=16,
+        #     lora_dropout=0.1,
+        #     bias="none",
+        #     target_modules=['q_proj', 'k_proj', 'v_proj', "out_proj"]
+        # )
+        # mbart_model = get_peft_model(mbart_model, lora_config)
+        #
+        #
+        # # Freeze non-LoRA parameters
+        # for name, param in mbart_model.named_parameters():
+        #     if 'lora' not in name:
+        #         param.requires_grad = False
+        # # -----------------------------------------------------------
+
+        # Use the encoder part of the LoRA-adapted MBart model
+        self.model_txt = mbart_model.get_encoder()
         self.lm_head = make_head(inplanes, planes, head_type)
 
+        # Ensure lm_head parameters are trainable
+        for param in self.lm_head.parameters():
+            param.requires_grad = True
+
     def forward(self, tgt_input):
-        txt_logits = self.model_txt(input_ids=tgt_input['input_ids'].cuda(), attention_mask=tgt_input['attention_mask'].cuda())[0]
+        txt_logits = self.model_txt(input_ids=tgt_input['input_ids'].cuda(),
+                                    attention_mask=tgt_input['attention_mask'].cuda())[0]
         output = txt_logits[torch.arange(txt_logits.shape[0]), tgt_input['input_ids'].argmax(dim=-1)]
         return self.lm_head(output), txt_logits
 
 class ImageCLIP(nn.Module):
-    def __init__(self, config, inplanes=1024, planes=1024, head_type='linear') :
+    def __init__(self, config, inplanes=1024, planes=1024, head_type='linear'):
         super(ImageCLIP, self).__init__()
         self.config = config
-        self.model =  FeatureExtracter() 
-        
-        self.trans_encoder = MBartForConditionalGeneration.from_pretrained(config['model']['visual_encoder']).get_encoder()
+        self.model = FeatureExtracter()
+
+        # Load the MBart model
+        mbart_model = MBartForConditionalGeneration.from_pretrained(config['model']['visual_encoder'])
+
+        # # ----------------------------------------------------------
+        # # Apply LoRA to mbart_model
+        # lora_config = LoraConfig(
+        #     task_type=TaskType.FEATURE_EXTRACTION,
+        #     r=8,
+        #     lora_alpha=16,
+        #     lora_dropout=0.1,
+        #     bias="none",
+        #     target_modules=['q_proj', 'k_proj', 'v_proj', "out_proj"]
+        # )
+        # mbart_model = get_peft_model(mbart_model, lora_config)
+        #
+        # # Freeze non-LoRA parameters
+        # for name, param in mbart_model.named_parameters():
+        #     if 'lora' not in name:
+        #         param.requires_grad = False
+        #
+        # # ----------------------------------------------------------
+
+        # Use the encoder part of the LoRA-adapted MBart model
+        self.trans_encoder = mbart_model.get_encoder()
         self.cls_token = nn.Parameter(torch.randn(1, 1, inplanes))
 
         self.lm_head = make_head(inplanes, planes, head_type)
-        
+
+        # Ensure lm_head and cls_token parameters are trainable
+        for param in self.lm_head.parameters():
+            param.requires_grad = True
+        self.cls_token.requires_grad = True
+
     def forward(self, src_input):
-       
+
         x = self.model(src_input['input_ids'].cuda(), src_input['src_length_batch']) # [b, n, c]
         attention_mask = src_input['attention_mask']
 
@@ -179,10 +234,38 @@ class ImageCLIP(nn.Module):
 class Text_Decoder(nn.Module):
     def __init__(self, config):
         super(Text_Decoder, self).__init__()
-        self.text_decoder = MBartForConditionalGeneration.from_pretrained(config['model']['visual_encoder']).get_decoder()
-        self.lm_head = MBartForConditionalGeneration.from_pretrained(config['model']['visual_encoder']).get_output_embeddings()
-        self.register_buffer("final_logits_bias", torch.zeros((1, MBartForConditionalGeneration.from_pretrained(config['model']['visual_encoder']).model.shared.num_embeddings)))
 
+        # Load the MBart model
+        mbart_model = MBartForConditionalGeneration.from_pretrained(config['model']['visual_encoder'])
+
+        # # ----------------------------------------------------------
+        # # Apply LoRA to mbart_model
+        # lora_config = LoraConfig(
+        #     task_type=TaskType.SEQ_2_SEQ_LM,
+        #     r=8,
+        #     lora_alpha=16,
+        #     lora_dropout=0.1,
+        #     bias="none",
+        #     target_modules=['q_proj', 'k_proj', 'v_proj', "out_proj"]
+        # )
+        # mbart_model = get_peft_model(mbart_model, lora_config)
+        #
+        # # Freeze non-LoRA parameters
+        # for name, param in mbart_model.named_parameters():
+        #     if 'lora' not in name:
+        #         param.requires_grad = False
+        #     else:
+        #         param.requires_grad = True
+        # # ----------------------------------------------------------
+
+        # Use the decoder part of the LoRA-adapted MBart model
+        self.text_decoder = mbart_model.get_decoder()
+        self.lm_head = mbart_model.get_output_embeddings()
+        self.register_buffer("final_logits_bias", torch.zeros((1, mbart_model.config.vocab_size)))
+
+        # Ensure lm_head parameters are trainable
+        for param in self.lm_head.parameters():
+            param.requires_grad = True
     
     def forward(self, tgt_input, masked_tgt_input, model_txt):
         with torch.no_grad():
@@ -208,6 +291,15 @@ class SLRCLIP(nn.Module):
         self.model_images = ImageCLIP(config, inplanes=embed_dim, planes=embed_dim)
 
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
+
+        # # ----------------------------------------------------------
+        # # Optionally, unfreeze parameters that you want to train
+        # for name, param in self.named_parameters():
+        #     if 'lora' in name or 'backbone' in name or 'lm_head' in name:
+        #         param.requires_grad = True
+        #     else:
+        #         param.requires_grad = False
+        # # ----------------------------------------------------------
 
     def get_model_txt(self):
         return self.model_txt
@@ -293,27 +385,100 @@ def config_decoder(config):
     elif decoder_type == 'LLMD':
         return MBartForConditionalGeneration.from_pretrained(config['model']['transformer'], ignore_mismatched_sizes = True, config = AutoConfig.from_pretrained(Path(config['model']['transformer'])/'LLMD_config.json'))
     elif decoder_type == 'MB50MMT':
-        return MBartForConditionalGeneration.from_pretrained(config['model']['transformer'], ignore_mismatched_sizes = True, config = AutoConfig.from_pretrained(Path(config['model']['transformer'])/'MB50MMT_config.json'))
+        return MBartForConditionalGeneration.from_pretrained(config['model']['transformer'], ignore_mismatched_sizes = True, config = AutoConfig.from_pretrained(Path(config['model']['transformer'])/'MB50MMT_config_new.json'))
 
 class gloss_free_model(nn.Module):
-    def __init__(self, config, args, embed_dim=1024, pretrain=None):
+    def __init__(self, config, args, embed_dim=1024):
         super(gloss_free_model, self).__init__()
         self.config = config
         self.args = args
 
         self.backbone = FeatureExtracter(frozen=_('freeze_backbone', False))
-        # self.mbart = MBartForConditionalGeneration.from_pretrained(config['model']['visual_encoder'])
         self.mbart = config_decoder(config)
- 
+
+        # Apply LoRA to mbart model
+        lora_config = LoraConfig(
+            task_type=TaskType.SEQ_2_SEQ_LM,
+            r=16,
+            lora_alpha=32,
+            lora_dropout=0.1,
+            bias="none",
+            target_modules=['q_proj',
+                            'k_proj',
+                            'v_proj',
+                            "out_proj"]
+        )
+        self.mbart = get_peft_model(self.mbart, lora_config)
+
+        # # Freeze non-LoRA parameters (we'll unfreeze them selectively after loading the checkpoint)
+        # for name, param in self.mbart.named_parameters():
+        #     if 'lora' not in name:
+
+
         if config['model']['sign_proj']:
-            self.sign_emb = V_encoder(emb_size=embed_dim,feature_size=embed_dim, config = config)
+            self.sign_emb = V_encoder(emb_size=embed_dim, feature_size=embed_dim, config=config)
             self.embed_scale = math.sqrt(embed_dim) if config['training']['scale_embedding'] else 1.0
         else:
             self.sign_emb = nn.Identity()
             self.embed_scale = 1.0
-        
+
+        # After applying LoRA
+        if args.finetune:
+            print('***********************************')
+            print('Loading pretrained weights...')
+            print('***********************************')
+            checkpoint = torch.load(args.finetune, map_location='cpu')
+
+            new_state_dict = OrderedDict()
+
+            # Load backbone weights
+            for k, v in checkpoint['model'].items():
+                if k.startswith('model_images.model.conv_2d') or k.startswith('model_images.model.conv_1d'):
+                    new_k = k.replace('model_images.model', 'backbone')
+                    new_state_dict[new_k] = v
+
+            # Load encoder weights (including LoRA weights)
+            for k, v in checkpoint['model'].items():
+                if k.startswith('model_images.trans_encoder'):
+                    new_k = k.replace('model_images.trans_encoder', 'mbart.base_model.model.model.encoder')
+                    new_state_dict[new_k] = v
+
+            # Load decoder weights (including LoRA weights)
+            for k, v in checkpoint['text_decoder'].items():
+                if k.startswith('module.text_decoder'):
+                    new_k = k.replace('module.text_decoder', 'mbart.base_model.model.model.decoder')
+                    new_state_dict[new_k] = v
+                elif k == 'module.lm_head.weight':
+                    new_state_dict['mbart.base_model.model.lm_head.weight'] = v
+                elif k == 'module.final_logits_bias':
+                    new_state_dict['mbart.base_model.model.final_logits_bias'] = v
+
+
+
+
+
+            # Load embeddings if they are in the checkpoint
+            # Else, initialize embeddings from scratch or load from pre-trained MBart
+
+            # Load the state dict into the model
+            ret = self.load_state_dict(new_state_dict, strict=False)
+            print('Missing keys: \n', '\n'.join(ret.missing_keys))
+            print('Unexpected keys: \n', '\n'.join(ret.unexpected_keys))
+
+            # Optionally, unfreeze parameters that you want to train
+            for name, param in self.mbart.named_parameters():
+                param.requires_grad = False
+                # if 'backbone' in name or 'mbart' in name:
+                if 'lora' in name or 'backbone' in name:
+                    param.requires_grad = True
+
+                if 'lm_head' in name or 'shared' in name:
+                    param.requires_grad = True
+
+            for param in self.backbone.conv_2d.parameters():
+                param.requires_grad = True
+
     def share_forward(self, src_input):
-        
         frames_feature = self.backbone(src_input['input_ids'].cuda(), src_input['src_length_batch'])
         attention_mask = src_input['attention_mask']
 
@@ -322,25 +487,22 @@ class gloss_free_model(nn.Module):
 
         return inputs_embeds, attention_mask
 
-    def forward(self,src_input, tgt_input ):
-        
+    def forward(self, src_input, tgt_input):
         inputs_embeds, attention_mask = self.share_forward(src_input)
 
-        out = self.mbart(inputs_embeds = inputs_embeds,
-                    attention_mask = attention_mask.cuda(),
-                    # decoder_input_ids = tgt_input['input_ids'].cuda(),
-                    labels = tgt_input['input_ids'].cuda(),
-                    decoder_attention_mask = tgt_input['attention_mask'].cuda(),
-                    return_dict = True,
-                    )
+        out = self.mbart(inputs_embeds=inputs_embeds,
+                         attention_mask=attention_mask.cuda(),
+                         labels=tgt_input['input_ids'].cuda(),
+                         decoder_attention_mask=tgt_input['attention_mask'].cuda(),
+                         return_dict=True)
         return out['logits']
-    
 
-    def generate(self,src_input,max_new_tokens,num_beams,decoder_start_token_id ):
+    def generate(self, src_input, max_new_tokens, num_beams, decoder_start_token_id):
         inputs_embeds, attention_mask = self.share_forward(src_input)
 
-        out = self.mbart.generate(inputs_embeds = inputs_embeds,
-                    attention_mask = attention_mask.cuda(),max_new_tokens=max_new_tokens,num_beams = num_beams,
-                                decoder_start_token_id=decoder_start_token_id
-                            )
+        out = self.mbart.generate(inputs_embeds=inputs_embeds,
+                                  attention_mask=attention_mask.cuda(),
+                                  max_new_tokens=max_new_tokens,
+                                  num_beams=num_beams,
+                                  decoder_start_token_id=decoder_start_token_id)
         return out

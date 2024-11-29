@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 import math, sys
 from loguru import logger
+import itertools
 
 from hpman.m import _
 import hpargparse
@@ -214,39 +215,51 @@ def main(args, config):
     model.to(device)
     print(model)
 
-    if args.finetune:
-        print('***********************************')
-        print('Load parameters for Visual Encoder...')
-        print('***********************************')
-        state_dict = torch.load(args.finetune, map_location='cpu')
-        new_state_dict = OrderedDict()
-        for k, v in state_dict['model'].items():
-            if 'conv_2d' in k or 'conv_1d' in k:
-                k = 'backbone.'+'.'.join(k.split('.')[2:])
-                new_state_dict[k] = v
-            if 'trans_encoder' in k:
-                k = 'mbart.model.encoder.'+'.'.join(k.split('.')[2:])
-                new_state_dict[k] = v
-            
-            if 'text_decoder' in state_dict:
-                for k, v in state_dict['text_decoder'].items():
-                    if 'decoder' in k:
-                        k = 'mbart.model.decoder.'+'.'.join(k.split('.')[2:])
-                        new_state_dict[k] = v
-            
-        # *replace the word embedding
-        model_dict = torch.load(config['model']['transformer']+'/pytorch_model.bin', map_location='cpu')
-        for k, v in model_dict.items():
-            if 'decoder.embed_tokens.weight' in k:
-                k = 'mbart.' + k
-                new_state_dict[k] = v
-            if 'decoder.embed_positions.weight' in k:
-                k = 'mbart.' + k
-                new_state_dict[k] = v
+    # if args.finetune:
+    #     print('***********************************')
+    #     print('Load parameters for Visual Encoder...')
+    #     print('***********************************')
+    #     state_dict = torch.load(args.finetune, map_location='cpu')
+    #     new_state_dict = OrderedDict()
+    #     for k, v in state_dict['model'].items():
+    #         if 'conv_2d' in k or 'conv_1d' in k:
+    #             k = 'backbone.'+'.'.join(k.split('.')[2:])
+    #             new_state_dict[k] = v
+    #         if 'trans_encoder' in k:
+    #             k = 'mbart.model.encoder.'+'.'.join(k.split('.')[2:])
+    #             new_state_dict[k] = v
+    #
+    #         if 'text_decoder' in state_dict:
+    #             for k, v in state_dict['text_decoder'].items():
+    #                 if 'decoder' in k:
+    #                     k = 'mbart.model.decoder.'+'.'.join(k.split('.')[2:])
+    #                     new_state_dict[k] = v
+    #
+    #     # *replace the word embedding
+    #     model_dict = torch.load(config['model']['transformer']+'/pytorch_model.bin', map_location='cpu')
+    #     for k, v in model_dict.items():
+    #         if 'decoder.embed_tokens.weight' in k:
+    #             k = 'mbart.' + k
+    #             new_state_dict[k] = v
+    #         if 'decoder.embed_positions.weight' in k:
+    #             k = 'mbart.' + k
+    #             new_state_dict[k] = v
+    #
+    #     ret = model.load_state_dict(new_state_dict, strict=False)
+    #     print('Missing keys: \n', '\n'.join(ret.missing_keys))
+    #     print('Unexpected keys: \n', '\n'.join(ret.unexpected_keys))
 
-        ret = model.load_state_dict(new_state_dict, strict=False)
-        print('Missing keys: \n', '\n'.join(ret.missing_keys))
-        print('Unexpected keys: \n', '\n'.join(ret.unexpected_keys))
+    # Verify trainable parameters
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    print(f"Total parameters: {total_params}")
+    print(f"Trainable parameters: {trainable_params}")
+
+    print("Trainable parameters:")
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            print(name)
 
     model_without_ddp = model
     if args.distributed:
@@ -443,6 +456,7 @@ def evaluate(args, dev_dataloader, model, model_without_ddp, tokenizer, criterio
             if (step+1) % 10 == 0 and args.visualize and utils.is_main_process():
                 utils.visualization(model_without_ddp.visualize())
 
+    # can remove padding?
     pad_tensor = torch.ones(200-len(tgt_pres[0])).to(device)
     tgt_pres[0] = torch.cat((tgt_pres[0],pad_tensor.long()),dim = 0)
     tgt_pres = pad_sequence(tgt_pres,batch_first=True,padding_value=PAD_IDX)

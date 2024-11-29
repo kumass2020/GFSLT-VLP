@@ -39,20 +39,12 @@ new_tokenizer.save_pretrained('pretrain_models/MBart_trimmed')
 new_model.save_pretrained('pretrain_models/MBart_trimmed')
 
 ## mytran_model
+# configuration = MBartConfig.from_pretrained('pretrain_models/mytran/config.json')
 configuration = MBartConfig.from_pretrained('pretrain_models/mytran/config.json')
 configuration.vocab_size = new_model.config.vocab_size
 mytran_model = MBartForConditionalGeneration._from_config(config=configuration)
 mytran_model.model.shared = new_model.model.shared
 
 mytran_model.save_pretrained('pretrain_models/mytran/')
-
-
-
-
-
-
-
-
-
 
 
